@@ -117,63 +117,67 @@ chathud.Tags = {
 			buffer.bgColor = self._bgColor or Color(255, 255, 255, 0)
 		end,
 	},
-	["translate"] = {
-		args = {
-			[1] = {type = "number", default = 0},	-- x
-			[2] = {type = "number", default = 0},	-- y
-		},
-		TagStart = function(self, markup, buffer, args)
-			self.mtrx = Matrix()
-		end,
-		Draw = function(self, markup, buffer, args)
-			self.mtrx:SetTranslation(Vector(chathud.x + args[1], markup.y + args[2]))
-			cam.PushModelMatrix(self.mtrx)
-		end,
-		TagEnd = function(self)
-			cam.PopModelMatrix()
-		end,
-	},
-	["rotate"] = {
-		args = {
-			[1] = {type = "number", default = 0},	-- y
-		},
-		TagStart = function(self, markup, buffer, args)
-			self.mtrx = Matrix()
-		end,
-		Draw = function(self, markup, buffer, args)
-			self.mtrx:SetTranslation(Vector(chathud.x, markup.y))
+	
+--	["translate"] = {
+--		args = {
+--			[1] = {type = "number", default = 0},	-- x
+--			[2] = {type = "number", default = 0},	-- y
+--		},
+--		TagStart = function(self, markup, buffer, args)
+--			self.mtrx = Matrix()
+--		end,
+--		Draw = function(self, markup, buffer, args)
+--			self.mtrx:SetTranslation(Vector(chathud.x + args[1], markup.y + args[2]))
+--			cam.PushModelMatrix(self.mtrx)
+--		end,
+--		TagEnd = function(self)
+--			cam.PopModelMatrix()
+--		end,
+--	},
+--
+--	["rotate"] = {
+--		args = {
+--			[1] = {type = "number", default = 0},	-- y
+--		},
+--		TagStart = function(self, markup, buffer, args)
+--			self.mtrx = Matrix()
+--		end,
+--		Draw = function(self, markup, buffer, args)
+--			self.mtrx:SetTranslation(Vector(chathud.x, markup.y))
+--
+--			self.mtrx:Translate(Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
+--				self.mtrx:Rotate(Angle(0, args[1], 0))
+--			self.mtrx:Translate(-Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
+--
+--			cam.PushModelMatrix(self.mtrx)
+--		end,
+--		TagEnd = function(self)
+--			cam.PopModelMatrix()
+--		end,
+--	},
+--
+--	["scale"] = {
+--		args = {
+--			[1] = {type = "number", default = 1},	-- x
+--			[2] = {type = "number", default = 1},	-- y
+--		},
+--		TagStart = function(self, markup, buffer, args)
+--			self.mtrx = Matrix()
+--		end,
+--		Draw = function(self, markup, buffer, args)
+--			self.mtrx:SetTranslation(Vector(chathud.x, markup.y))
+--
+--			self.mtrx:Translate(Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
+--				self.mtrx:Scale(Vector(args[1], args[2]))
+--			self.mtrx:Translate(-Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
+--
+--			cam.PushModelMatrix(self.mtrx)
+--		end,
+--		TagEnd = function(self)
+--			cam.PopModelMatrix()
+--		end,
+--	},
 
-			self.mtrx:Translate(Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
-				self.mtrx:Rotate(Angle(0, args[1], 0))
-			self.mtrx:Translate(-Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
-
-			cam.PushModelMatrix(self.mtrx)
-		end,
-		TagEnd = function(self)
-			cam.PopModelMatrix()
-		end,
-	},
-	["scale"] = {
-		args = {
-			[1] = {type = "number", default = 1},	-- x
-			[2] = {type = "number", default = 1},	-- y
-		},
-		TagStart = function(self, markup, buffer, args)
-			self.mtrx = Matrix()
-		end,
-		Draw = function(self, markup, buffer, args)
-			self.mtrx:SetTranslation(Vector(chathud.x, markup.y))
-
-			self.mtrx:Translate(Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
-				self.mtrx:Scale(Vector(args[1], args[2]))
-			self.mtrx:Translate(-Vector(buffer.x, buffer.y + (buffer.h * 0.5)))
-
-			cam.PushModelMatrix(self.mtrx)
-		end,
-		TagEnd = function(self)
-			cam.PopModelMatrix()
-		end,
-	},
 }
 chathud.Shortcuts = {}
 
@@ -183,7 +187,7 @@ chathud.w = 550
 
 chathud.markups = {}
 
-for _, icon in pairs(file.Find("materials/icon16/*.png", "GAME")) do
+for _, icon in ipairs(file.Find("materials/icon16/*.png", "GAME")) do
 	chathud.Shortcuts[string.StripExtension(icon)] = "<texture=icon16/" .. icon .. ">"
 end
 
@@ -205,13 +209,23 @@ function chathud.CreateSteamShortcuts(update)
 	if file.Exists(latest, "DATA") and not update then
 		local data = file.Read(latest, "DATA")
 
-		for name in data:gmatch([["name": ":(.-):"]]) do
-			if not chathud.Shortcuts[name] and not blacklist[name] then chathud.Shortcuts[name] = "<se=" .. name .. ">" end
+		local explode = string.Split(data, ",")
+		for key, name in ipairs(explode) do
+			if not chathud.Shortcuts[name] and not blacklist[name] then
+				chathud.Shortcuts[name] = "<se=" .. name .. ">"
+			end
 		end
 	else
-		http.Fetch("http://cdn.steam.tools/data/emote.json", function(b)
-			for name in b:gmatch([["name": ":(.-):"]]) do
-				if not chathud.Shortcuts[name] and not blacklist[name] then chathud.Shortcuts[name] = "<se=" .. name .. ">" end
+		http.Fetch("https://raw.githubusercontent.com/Earu/EasyChat/master/external_data/steam_emoticons.txt", function(b, _, _, code)
+			if code ~= 200 then
+				return
+			end
+
+			local explode = string.Split(b, ",")
+			for key, name in ipairs(explode) do
+				if not chathud.Shortcuts[name] and not blacklist[name] then
+					chathud.Shortcuts[name] = "<se=" .. name .. ">"
+				end
 			end
 
 			file.Write(latest, b)
@@ -219,41 +233,6 @@ function chathud.CreateSteamShortcuts(update)
 	end
 end
 chathud.CreateSteamShortcuts()
-
-function chathud.CreateTwitchShortcuts(update)
-	local tag = os.date("%Y%m%d")
-	local latest = "twitch_global_emotes_" .. tag .. ".dat"
-
-	local found = file.Find("emoticon_cache/twitch_global_emotes_*.dat", "DATA")
-	for k, v in next,found do
-		if v ~= latest then file.Delete("emoticon_cache/" .. v) end
-	end
-
-	latest = "emoticon_cache/" .. latest
-
-	if file.Exists(latest, "DATA") and not update then
-		local data = file.Read(latest, "DATA")
-
-		local d = util.JSONToTable(data)
-		if not d then return ErrorNoHalt("ChatHUD: Failed to read existing Twitch Emote cache.\n") end
-
-		for name, v in pairs(d) do
-			if not chathud.Shortcuts[name] and not blacklist[name] then chathud.Shortcuts[name] = "<te=" .. v.id .. ">" end
-		end
-	else
-		http.Fetch("https://twitchemotes.com/api_cache/v3/global.json", function(b)
-			local d = util.JSONToTable(b)
-			if not d then return ErrorNoHalt("ChatHUD: Failed to updated Twitch Emote cache.\n") end
-
-			for name, v in pairs(d) do
-				if not chathud.Shortcuts[name] and not blacklist[name] then chathud.Shortcuts[name] = "<te=" .. v.id .. ">" end
-			end
-
-			file.Write(latest, b)
-		end)
-	end
-end
-chathud.CreateTwitchShortcuts()
 
 function chathud:AddMarkup()
 	local markup = class:new("Markup")
@@ -277,7 +256,7 @@ function chathud:AddText(...)
 	local markup = self:AddMarkup()
 	markup:StartLife(10)
 	markup:AddFont("chathud_18")
-	markup:AddShadow(chathud.oldShadow and 2 or 4)
+	markup:AddShadow(chathud.oldShadow and 2 or 3)
 	for i = 1, select("#", ...) do
 		local var = select(i, ...)
 		if isstring(var) then
@@ -305,8 +284,9 @@ function chathud:AddText(...)
 end
 
 function chathud:Think()
-	for _, markup in pairs(self.markups) do
-		markup:AlphaTick()
+	local markups = self.markups
+    for i = 1, #markups do
+		markups[i]:AlphaTick()
 	end
 end
 
@@ -327,35 +307,67 @@ function chathud:PerformLayout()
 end
 
 function chathud:TagPanic()
-	for _, markup in pairs(self.markups) do
-		markup:TagPanic(false)
+	local markups = self.markups
+    for i = 1, #markups do
+		markups[i]:TagPanic(false)
 	end
 end
 
 local matrix = Matrix()
+local surface_SetAlphaMultiplier = surface.SetAlphaMultiplier
+local cam_PushModelMatrix = cam.PushModelMatrix
+local cam_PopModelMatrix = cam.PopModelMatrix
+local pcall = pcall
+local Msg = Msg
+local print = print
+local debug_traceback = debug.traceback
+local Vector = Vector
+local localizedVec = Vector()
+local VMatrix = FindMetaTable("VMatrix")
+local SetTranslation = VMatrix.SetTranslation
+
 function chathud:Draw()
-	if self.needs_layout then
-		self:PerformLayout()
-	end
-	for _, markup in pairs(self.markups) do
-		local alpha = markup.alpha
-		if alpha > 0 then
-			surface.SetAlphaMultiplier(alpha / 255)
-			matrix:SetTranslation(Vector(pace and pace.IsActive() and pace.Editor:GetAlpha() ~= 0 and chathud.x + pace.Editor:GetWide() or chathud.x, markup.y or 0, 0))
-			cam.PushModelMatrix(matrix)
-			local ok, why = pcall(markup.Draw, markup)
-			if not ok then
-				Msg"ChatHUD " print("Drawing Error!")
-				print(why, "\n", debug.traceback())
-			end
-			cam.PopModelMatrix()
-		end
-		surface.SetAlphaMultiplier(1)
-	end
-	if self.needs_layout then
-		self:PerformLayout()
-		self.needs_layout = nil
-	end
+    if self.needs_layout then
+        self:PerformLayout()
+    end
+
+    local markups = self.markups
+    local chathud_x = chathud.x
+    local pace_active = pace and pace.IsActive()
+    local pace_editor_alpha = pace_active and pace.Editor:GetAlpha()
+    local pace_editor_wide = pace_active and pace_editor_alpha ~= 0 and pace.Editor:GetWide()
+
+    for i = 1, #markups do
+        local markup = markups[i]
+        local alpha = markup.alpha
+
+        if alpha > 0 then
+            surface_SetAlphaMultiplier(math.ease.InOutQuart(alpha / 255))
+
+            local x = chathud_x
+            if pace_editor_wide then
+                x = x + pace_editor_wide
+            end
+			localizedVec.x = x
+			localizedVec.y = markup.y or 0
+            SetTranslation(matrix, localizedVec)
+
+            cam_PushModelMatrix(matrix)
+            local ok, why = pcall(markup.Draw, markup)
+            if not ok then
+                Msg"ChatHUD " print("Drawing Error!")
+                print(why, "\n", debug_traceback())
+            end
+            cam_PopModelMatrix()
+        end
+    end
+
+    surface_SetAlphaMultiplier(1)
+
+    if self.needs_layout then
+         self:PerformLayout()
+         self.needs_layout = nil
+    end
 end
 
 -------------------------
@@ -388,7 +400,7 @@ do
 end
 
 file.CreateDir("emoticon_cache")
-file.CreateDir("emoticon_cache/twitch")
+
 function chathud:GetSteamEmoticon(emoticon)
 	emoticon = emoticon:gsub(":",""):Trim()
 	if emoticon_cache[emoticon] then
@@ -401,7 +413,7 @@ function chathud:GetSteamEmoticon(emoticon)
 		MakeCache("emoticon_cache/" .. emoticon .. ".png", emoticon)
 	return emoticon_cache[emoticon] or false end
 	Msg"ChatHUD " print("Downloading emoticon " .. emoticon)
-	http.Fetch("http://steamcommunity-a.akamaihd.net/economy/emoticonhover/:" .. emoticon .. ":	", function(body, len, headers, code)
+	http.Fetch("https://steamcommunity-a.akamaihd.net/economy/emoticonhover/:" .. emoticon .. ":", function(body, len, headers, code)
 		if code == 200 then
 			if body == "" then
 				Msg"ChatHUD " print("Server returned OK but empty response")
@@ -415,32 +427,6 @@ function chathud:GetSteamEmoticon(emoticon)
 			if not body then Msg"ChatHUD " print("ERROR! (not b64)", b64) return end
 			file.Write("emoticon_cache/" .. emoticon .. ".png", body)
 			MakeCache("emoticon_cache/" .. emoticon .. ".png", emoticon)
-		else
-			Msg"ChatHUD " print("Download failure. Code: " .. code)
-		end
-	end)
-	busy[emoticon] = true
-	return false
-end
-function chathud:GetTwitchEmoticon(emoticon)
-	if emoticon_cache[emoticon] then
-		return emoticon_cache[emoticon]
-	end
-	if busy[emoticon] then
-		return false
-	end
-	if file.Exists("emoticon_cache/twitch/" .. emoticon .. ".png", "DATA") then
-		MakeCache("emoticon_cache/twitch/" .. emoticon .. ".png", emoticon)
-	return emoticon_cache[emoticon] or false end
-	Msg"ChatHUD " print("Downloading emoticon " .. emoticon)
-	http.Fetch("https://static-cdn.jtvnw.net/emoticons/v1/" .. emoticon .. "/3.0", function(body, len, headers, code)
-		if code == 200 then
-			if body == "" then
-				Msg"ChatHUD " print("Server returned OK but empty response")
-			return end
-			Msg"ChatHUD " print("Download OK")
-			file.Write("emoticon_cache/twitch/" .. emoticon .. ".png", body)
-			MakeCache("emoticon_cache/twitch/" .. emoticon .. ".png", emoticon)
 		else
 			Msg"ChatHUD " print("Download failure. Code: " .. code)
 		end
@@ -469,30 +455,6 @@ chathud.Tags["se"] = {
 	Draw = function(self, markup, buffer, args)
 		local image, size = args[1], args[2]
 		image = chathud:GetSteamEmoticon(image)
-		if image == false then image = MaterialCache("error") end
-		surface.SetDrawColor(buffer.fgColor)
-		surface.SetMaterial(image)
-		surface.DrawTexturedRect(buffer.x, buffer.y, size, size)
-	end,
-	ModifyBuffer = function(self, markup, buffer, args)
-		local size = args[2]
-		buffer.h, buffer.x = size, buffer.x + size
-		if buffer.x > markup.w then
-			buffer.x = 0
-			buffer.y = buffer.y + size
-			buffer.h = buffer.y + size
-		end
-	end,
-}
-
-chathud.Tags["te"] = {
-	args = {
-		[1] = {type = "string", default = "error"},
-		[2] = {type = "number", min = 8, max = 128, default = 18},
-	},
-	Draw = function(self, markup, buffer, args)
-		local image, size = args[1], args[2]
-		image = chathud:GetTwitchEmoticon(image)
 		if image == false then image = MaterialCache("error") end
 		surface.SetDrawColor(buffer.fgColor)
 		surface.SetMaterial(image)
@@ -563,7 +525,7 @@ function chathud:DoArgs(str, argfilter)
 			end
 		else
 			if f.type == "number" then
-				value = number(m, f.min, f.max, f.default)
+				value = tonumber(m) or f.default
 			else
 				value = m or f.default or ""
 			end

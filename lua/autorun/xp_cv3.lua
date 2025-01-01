@@ -1,23 +1,31 @@
-local disable = CreateConVar("xp_chat_disable", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE})
-if disable:GetBool() then return end
+local disabled = false
+
+if CLIENT then
+	local cvarDisable = CreateClientConVar("xp_chat_disable", "0", true, false)
+	disabled = cvarDisable:GetBool()
+
+	cvars.AddChangeCallback("xp_chat_disable", function(_, _, newValue)
+		disabled = tobool(newValue)
+		
+	end, "xp_chat_disable")
+elseif disabled then
+	return
+end
 
 local function includec(...) AddCSLuaFile(...) return include(...) end
 class	= includec"xp3/class.lua"
 luadata	= includec"xp3/luadata.lua"
+includec"xp3/lang.lua" 
 
 function _f(d)
 	return isfunction(d) and d() or d
-end
+end  
 
+local tonumber = tonumber 
 function number(d, min, max, default)
-	local m = tonumber(_f(d)) or tonumber(default) or 0
-	if tonumber(min) then
-		m = math.max(min, m)
-	end
-	if tonumber(max) then
-		m = math.min(max, m)
-	end
-	return m
+	d = tonumber(d) or default
+	d = d > max and max or d < min and min or d
+	return d
 end
 
 function utf_totable(str)
@@ -30,6 +38,13 @@ end
 
 includec"xp3/chatexp.lua"
 
+chat.ModeString = {
+	[CHATMODE_DEFAULT] = chat.L"Chat",
+	[CHATMODE_LOCAL] = chat.L"Local"
+}
+ 
+chat.DefaultModeString = chat.ModeString[CHATMODE_DEFAULT]
+
 local convar_custom_handle = CreateConVar("xp_chat_force_source_handle", "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE})
 local convar_limited_tags  = CreateConVar("xp_chat_limited_tags",        "0", {FCVAR_REPLICATED, FCVAR_ARCHIVE})
 
@@ -39,11 +54,13 @@ hook.Add("ChatShouldHandle", "chatexp.compat", function(handler, msg, mode)
 end)
 
 if SERVER then
-	AddCSLuaFile"xp3/basewars_compat.lua"
 	AddCSLuaFile"xp3/markup.lua"
 	AddCSLuaFile"xp3/chathud.lua"
 	AddCSLuaFile"xp3/chatbox.lua"
+	AddCSLuaFile"xp3/richtextx.lua"
 return end
+
+include"xp3/richtextx.lua"
 
 hook.Add("CanPlayerUseTag", "chathud.restrict", function(ply, tag, args)
 	if not IsValid(ply) then return true end -- chat.addtext, console and such
@@ -86,11 +103,6 @@ local function do_hook()
 	local gm = GM or GAMEMODE
 	if not gm then return end
 
-	if BaseWars and not chatexp.Devs then
-		include"xp3/basewars_compat.lua"
-	end
-
-	chatexp._oldGamemodeHook = chatexp._oldGamemodeHook or gm.OnPlayerChat
 	function gm:OnPlayerChat(ply, msg, mode, dead, mode_data)
 		chatexp.LastPlayer = ply
 
@@ -142,7 +154,7 @@ local function do_hook()
 end
 
 do_hook()
-hook.Add("InitPostEntity", "xp.do_hook", do_hook)
+hook.Add("Initialize", "xp.do_hook", do_hook)
 hook.Add("OnReloaded", "xp.do_hook", do_hook)
 
 if chatbox and IsValid(chatbox.frame) then chatbox.frame:Close() end
@@ -176,21 +188,35 @@ doFonts()
 
 do -- chathud
 	hook.Add("HUDPaint", "chathud.draw", function()
+		if disabled then
+			return
+		end
+
 		chathud:Draw()
 	end)
 
 	hook.Add("HUDShouldDraw", "chathud.disable", function(ch)
-		if ch == "CHudChat" then return false end
+		if disabled then
+			return
+		end
+
+		if ch == "CHudChat" then
+			return false
+		end
 	end)
 
 	hook.Add("Think", "chathud", function()
+		if disabled then
+			return
+		end
+
 		chathud:Think()
 	end)
 
 	hook.Add("OnPlayerChat", "chathud.tagpanic", function(_,txt)
 		if txt:lower():Trim() == "sh" then chathud:TagPanic() end
 	end)
-end
+end 
 
 chatbox	= include"xp3/chatbox.lua"
 chatgui = setmetatable({}, {__index = chatbox})
@@ -209,18 +235,17 @@ do -- chatbox
 	hook.Add("SendDM", "chatbox.dm_send", function(ply, text)
 		if not IsValid(chatbox.frame) then chatbox.Build() end
 
-		chatbox.AddDMTab(ply)
 		chatbox.ParseInto(chatbox.GetDMFeed(ply), LocalPlayer(), color_white, ": ", text)
 	end)
 
 	hook.Add("ReceiveDM", "chatbox.dm_receive", function(ply, text)
-		if not IsValid(chatbox.frame) then chatbox.Build() end
+		if not IsValid(chatbox.frame) then chatbox.Build() end 
 
-		chatbox.AddDMTab(ply)
 		chatbox.ParseInto(chatbox.GetDMFeed(ply), ply, color_white, ": ", text)
 	end)
 
 	hook.Add("PlayerBindPress", "chatbox.bind", function(ply, bind, down)
+		if disabled then return end
 		if not down then return end
 		if not IsValid(chatbox.frame) then chatbox.Build() end
 
@@ -229,7 +254,7 @@ do -- chatbox
 		if bind == "messagemode2" then
 			team_chat = true
 		elseif bind ~= "messagemode" then return end
-
+		print("should be disabled", disabled)
 		chatbox.Open(team_chat)
 		return true
 	end)
@@ -252,25 +277,26 @@ end
 -- Start compatability for addons
 
 chat.old_pos = chat.old_pos or chat.GetChatBoxPos
+chat.old_size = chat.old_size or chat.GetChatBoxSize
+chat.old_open = chat.old_open or chat.Open
+chat.old_close = chat.old_close or chat.Close
+
 function chat.GetChatBoxPos()
 	if not IsValid(chatbox.frame) then chatbox.Build() end
 
 	return chatbox.frame:GetPos()
 end
 
-chat.old_size = chat.old_size or chat.GetChatBoxSize
 function chat.GetChatBoxSize()
 	if not IsValid(chatbox.frame) then chatbox.Build() end
 
 	return chatbox.frame:GetSize()
 end
 
-chat.old_open = chat.old_open or chat.Open
 function chat.Open(mode)
 	chatbox.Open(mode == 1)
 end
 
-chat.old_close = chat.old_close or chat.Close
 function chat.Close()
 	chatbox.Close()
 end

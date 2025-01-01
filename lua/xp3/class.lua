@@ -49,7 +49,7 @@ function class:new(name, ...)
 end
 
 function class.type(obj)
-	return obj.MetaName or type(class)
+	return obj.MetaName or type(obj)
 end
 
 function class:makeFunction(n)
@@ -59,3 +59,4 @@ function class:makeFunction(n)
 end
 
 return class
+

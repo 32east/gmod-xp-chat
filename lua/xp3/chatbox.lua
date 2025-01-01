@@ -7,17 +7,47 @@ chatbox.settings = {
 	}]]
 }
 
-local box_font = CreateClientConVar("xp_chat_box_font","DermaDefaultBold",true,false,"Changes the Fonts of the chatbox itself.")
-cvars.AddChangeCallback("xp_chat_box_font",function(cv,_,new) chatbox.box_font = new end)
+local box_font = CreateClientConVar("xp_chat_box_font","Roboto",true,false,"Changes the Fonts of the chatbox itself.")
+local feed_font = CreateClientConVar("xp_chat_feed_font","Roboto",true,false,"Changes the Font of the text displayed inside the chatbox.")
 
-local feed_font = CreateClientConVar("xp_chat_feed_font","ChatFont",true,false,"Changes the Font of the text displayed inside the chatbox.")
-cvars.AddChangeCallback("xp_chat_feed_font",function(cv,_,new) chatbox.feed_font = new end)
+local editedFonts = {}
+local editedBoxFont = 0
+local editedFeedFont = 0
+local currentBoxFontName = "xp_chat_box_font"
+local currentFeedFontName = "xp_chat_feed_font"
+local currentTab = 1
 
-chatbox.accent_color = Color(255, 192, 203, 255)
+local createFont = function(whatFont, fontName)
+	if whatFont == "xp_chat_box_font" then
+		editedBoxFont = editedBoxFont + 1
+		currentBoxFontName = whatFont .. "_" .. editedBoxFont
+	else
+		editedFeedFont = editedFeedFont + 1
+		currentFeedFontName = whatFont .. "_" .. editedBoxFont
+	end
+
+	surface.CreateFont(whatFont .. "_" .. editedBoxFont, {
+		font = fontName,
+		size = 16,
+		extended = true,
+		antialias = true,
+	})
+end
+
+cvars.AddChangeCallback("xp_chat_box_font",function(cv,_,new)
+	createFont("xp_chat_box_font", new)
+end, "xp_chat_box_font")
+
+cvars.AddChangeCallback("xp_chat_feed_font",function(cv,_,new)
+	createFont("xp_chat_feed_font", new)
+end, "xp_chat_feed_font")
+
+createFont("xp_chat_box_font", box_font:GetString())
+createFont("xp_chat_feed_font", feed_font:GetString())
+
+chatbox.accent_color = Color(230, 230, 230, 255)
 chatbox.back_color   = Color(000, 000, 000, 200)
 chatbox.input_color  = Color(000, 000, 000, 150)
-chatbox.box_font     = box_font:GetString()
-chatbox.feed_font    = feed_font:GetString()
 
 local CONFIG_FILE = "xp_chat_config.lua"
 do
@@ -40,8 +70,6 @@ function chatbox.WriteConfig()
 			accent_color = chatbox.accent_color,
 			back_color = chatbox.back_color,
 			input_color = chatbox.input_color,
-			box_font = chatbox.box_font,
-			feed_font = chatbox.feed_font,
 		}
 
 		data = luadata.Encode(data)
@@ -177,8 +205,31 @@ function chatbox.ParseInto(feed, ...)
 	feed:AppendText("\n")
 end
 
-local function tab_paint(w, h)
-	-- Looks better without
+local tabHeight = 26
+local function tab_paint(self, w, h)
+	surface.SetFont(currentBoxFontName)
+	local wText = surface.GetTextSize(self.Name)
+
+	self:SetTall(tabHeight)
+	self:SetWide(wText + tabHeight / 2 + 15)
+	
+	local w, h = self:GetSize()
+
+	self.LerpAlpha = Lerp(RealFrameTime() * 10, self.LerpAlpha or 0, (self:IsHovered() or currentTab == self.Index) and 1 or 0)
+
+	draw.RoundedBox(0, 0, 0, w, h, Color(10, 10, 10, 220))
+
+	surface.SetAlphaMultiplier(self.LerpAlpha)
+	draw.RoundedBox(0, 0, 0, w, h, Color(255, 255, 255, 5))
+	surface.SetAlphaMultiplier(1)
+
+	draw.RoundedBox(0, 0, h - 2, w, 2, Color(200, 200, 200, 230))
+
+	surface.SetDrawColor(255,255,255)
+	surface.SetMaterial(self.Icon)
+	surface.DrawTexturedRect(5, h / 4, h / 2, h / 2)
+
+	draw.SimpleText(self.Name, currentBoxFontName, h / 2 + 10, h / 2, Color(230, 230, 230), 0, 1)
 end
 
 local function input_type(enter, tab, all)
@@ -199,6 +250,12 @@ local function input_type(enter, tab, all)
 
 		if key == KEY_TAB then
 			tab(pan, txt)
+
+			chatbox.mode = (chatbox.mode + 1) % #chatexp.Modes
+			
+			if chatbox.mode <= 0 then
+				chatbox.mode = 1
+			end
 		end
 
 		if key == KEY_UP then
@@ -230,22 +287,23 @@ local function input_paint(pan, w, h)
 end
 
 local function feed_layout(pan)
-	pan:SetFontInternal(chatbox.feed_font)
+	pan:SetFontInternal(currentFeedFontName)
+	pan:SetUnderlineFont(currentFeedFontName)
+	pan:SetFGColor(Color(0, 0, 0, 255))
 end
 
 function chatbox.GetModeString()
-	return (CHATMODE_TEAM and chatbox.mode == CHATMODE_TEAM or chatbox.mode == true) and "Team" or "Chat"
+	return chat.ModeString[chatbox.mode] or chat.DefaultModeString
 end
 
 function chatbox.BuildTabChat(self, a)
 	self.chat = vgui.Create("DPanel", self.tabs)
 		function self.chat:Paint(w, h) end
 		self.chat:Dock(FILL)
-
-		self.chat.text_feed = vgui.Create("RichText", self.chat)
-			self.chat.text_feed:Dock(FILL)
-
-			self.chat.text_feed.PerformLayout = feed_layout
+		self.chat.text_feed = vgui.Create("RichTextX", self.chat)
+		self.chat.text_feed:Dock(FILL)
+		self.chat.text_feed:DockMargin(0, 0, 0, 2)
+		self.chat.text_feed.PerformLayout = feed_layout
 
 		self.chat.input_base = vgui.Create("DPanel", self.chat)
 			function self.chat.input_base:Paint(w, h) end
@@ -260,14 +318,12 @@ function chatbox.BuildTabChat(self, a)
 				self.chat.input.OnKeyCodeTyped = input_type(
 				function(pan, txt)
 					if txt ~= "" then
-						local team = (chatexp and chatbox.mode == CHATMODE_TEAM) or (not chatexp and chatbox.mode == true)
-
 						if chatexp and hook.Run("ChatShouldHandle", "chatexp", txt, chatbox.mode) ~= false then
 							chatexp.Say(txt, chatbox.mode)
-						elseif chitchat and chitchat.Say and hook.Run("ChatShouldHandle", "chitchat", txt, chatbox.mode and 2 or 1) ~= false then
-							chitchat.Say(txt, team and 2 or 1)
+						elseif chitchat and chitchat.Say and hook.Run("ChatShouldHandle", "chitchat", txt, 1) ~= false then
+							chitchat.Say(txt, 1)
 						else
-							LocalPlayer():ConCommand((team and "say_team \"" or "say \"") .. txt .. "\"")
+							LocalPlayer():ConCommand("say \"" .. txt .. "\"")
 						end
 					end
 
@@ -280,7 +336,10 @@ function chatbox.BuildTabChat(self, a)
 						pan:SetText(tab)
 					end
 
-					timer.Simple(0, function() pan:RequestFocus() pan:SetCaretPos(pan:GetText():len()) end)
+					timer.Simple(0, function()
+						pan:RequestFocus()
+						pan:SetCaretPos(pan:GetText():len())
+					end)
 				end,
 				function(pan, txt)
 					hook.Run("ChatTextChanged", txt)
@@ -292,27 +351,43 @@ function chatbox.BuildTabChat(self, a)
 					hook.Run("ChatTextChanged", self:GetText() or "")
 				end
 
-				function self.chat.input.Think(pan) pan:SetFont(chatbox.box_font) end
+				function self.chat.input.Think(pan) pan:SetFont(currentBoxFontName) end
 
-			self.chat.mode = vgui.Create("DPanel", self.chat.input_base)
+			self.chat.mode = vgui.Create("DButton", self.chat.input_base)
+				self.chat.mode:SetText("")
 				self.chat.mode:Dock(LEFT)
 				self.chat.mode:SetWide(48)
 
-				function self.chat.mode.Paint(pan, w, h)
-					paint_back(pan, w, h, true)
-
-					local text = chatbox.GetModeString()
-					draw.SimpleText(text, chatbox.box_font, w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				function self.chat.mode.DoClick()
+					self.chat.input.OnKeyCodeTyped(self.chat.input, KEY_TAB)
 				end
 
-		a = self.tabs:AddSheet("Chat", self.chat)
-		a.Tab.Paint = tab_paint
-		function a.Tab.Think(pan) pan:SetFont(chatbox.box_font) end
+				function self.chat.mode.Paint(pan)
+					local text = chatbox.GetModeString()
+					surface.SetFont(currentBoxFontName)
+					local textW = surface.GetTextSize(text)
+					pan:SetWide(textW + 16)
+
+					local w, h = pan:GetSize()
+					paint_back(pan, w, h, true)
+
+					if pan:IsHovered() then
+						draw.RoundedBox(0, 0, 0, w, h, Color(50, 50, 50, 50))
+					end
+
+					draw.SimpleText(text, currentBoxFontName, w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				end
+
+		a = self.tabs:AddSheet(chat.L"Chat", self.chat, "icon16/comments.png")
+
+		function a.Tab.Think(pan) pan:SetFont(currentBoxFontName) end
+	
+	return self.chat
 end
 
 function chatbox.GetDMFeed(ply)
 	if not chatexp or not IsValid(ply) then return end
-	local sid = ply:SteamID()
+	local sid = ply:AccountID()
 
 	local self = chatbox.frame.direct_messages
 	if not IsValid(self.tabs[sid]) then return end
@@ -325,29 +400,38 @@ local function get_player(sid)
 	if IsValid(cache[sid]) then return cache[sid] end
 
 	for k, v in next, player.GetAll() do
-		if v:SteamID() == sid then cache[sid] = v return v end
+		if v:AccountID() == sid then cache[sid] = v return v end
 	end
 
 	return NULL
 end
 
+local currentSelectedUser
+
 function chatbox.AddDMTab(ply)
-	if not chatexp or not IsValid(ply) then return end
-	local sid = ply:SteamID()
+	if not IsValid(chatbox.frame) or not chatexp or not IsValid(ply) or ply == LocalPlayer() then return end
+	local sid = ply:AccountID()
 
 	local self = chatbox.frame.direct_messages
 	if IsValid(self.tabs[sid]) then return end
 
-	self.tabs[sid] = vgui.Create("DPanel", self)
+	self.tabs[sid] = vgui.Create("DPanel", chatbox.frame.double)
 	local tab = self.tabs[sid]
 
 	function tab:Paint(w, h) end
 	tab:Dock(FILL)
 
-	tab.feed = vgui.Create("RichText", tab)
+	tab.feed = vgui.Create("RichTextX", tab)
 		tab.feed:Dock(FILL)
-
+		tab.feed:DockMargin(0, 0, 0, 5)
 		tab.feed.PerformLayout = feed_layout
+		tab.feed:InsertColorChange(230, 230, 230, 255)
+		tab.feed:AppendText("== Начало истории общения с ")
+		local clr = team.GetColor(ply)
+		tab.feed:InsertColorChange(clr.r or 230, clr.g or 230, clr.b or 230, 255)
+		tab.feed:AppendText(ply:Name())
+		tab.feed:InsertColorChange(230, 230, 230, 255)
+		tab.feed:AppendText(" ==")
 
 	tab.input_base = vgui.Create("DPanel", tab)
 		function tab.input_base:Paint(w, h) end
@@ -374,39 +458,137 @@ function chatbox.AddDMTab(ply)
 
 			tab.input.Paint = input_paint
 
-			function tab.input.Think(pan) pan:SetFont(chatbox.box_font) end
+			function tab.input.Think(pan) pan:SetFont(currentBoxFontName) end
 
-		tab.mode = vgui.Create("DPanel", tab.input_base)
-			tab.mode:Dock(LEFT)
-			tab.mode:SetWide(48)
-
-			function tab.mode.Paint(pan, w, h)
-				paint_back(pan, w, h, true)
-
-				local text = "Direct"
-				draw.SimpleText(text, chatbox.box_font, w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-			end
-
-	local a = self:AddSheet(ply:Nick(), tab)
-	a.Tab.Paint = tab_paint
-	function a.Tab.Think(pan)
-		if IsValid(get_player(sid)) then pan:SetText(get_player(sid):Nick()) end
-		pan:SetFont(chatbox.box_font)
+	local a = self:AddLine("")
+	a.AccountID = ply:AccountID()
+	a.Player = ply
+	a.HoverAlpha = 0
+	a:SetCursor("hand")
+	a.Paint = function(self, w, h)
+		if self:IsHovered() then
+			a.HoverAlpha = Lerp(RealFrameTime() * 16, a.HoverAlpha, 1)
+		else
+			a.HoverAlpha = Lerp(RealFrameTime() * 16, a.HoverAlpha, 0)
+		end
+	
+		if currentSelectedUser == a.AccountID then
+			draw.RoundedBox(0, 0, 0, w, h, Color(30, 150, 30))
+		else
+			surface.SetAlphaMultiplier(a.HoverAlpha)
+			draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30))
+			surface.SetAlphaMultiplier(1)
+		end
+	
+		if IsValid(ply) then
+			draw.SimpleText(ply:Nick(), currentBoxFontName, 5, h / 2, color_white, 0, 1)
+		end
 	end
+
+	function a.Think(pan)
+		if IsValid(ply) then
+			pan:SetText(ply:Nick())
+		else
+			a:Remove()
+			self.tabs[a.AccountID] = nil
+		end
+	end
+	
+	tab:Hide()
 end
 
 function chatbox.BuildTabDMs(self, a)
 	if not chatexp then return end
-	self.direct_messages = vgui.Create("DPropertySheet", self.tabs)
-		function self.direct_messages:Paint(w, h) end
-		self.direct_messages:Dock(FILL)
+	self.double = vgui.Create("DPanel", self.tabs)
+	self.double:Dock(FILL)
+	self.double.Paint = function() end
 
-		self.direct_messages.tabs = {}
+	self.direct_messages = vgui.Create("DListView", self.double)
+	self.direct_messages:SetMultiSelect(false)
+	self.direct_messages:SetHideHeaders(true)
+	self.direct_messages:AddColumn("")
+	self.direct_messages:SetWidth(128)
+	self.direct_messages:SetDataHeight(20)
+	self.direct_messages:DockMargin(0, 0, 5, 0)
+	self.direct_messages:Dock(LEFT)
 
-		a = self.tabs:AddSheet("DMs", self.direct_messages)
-		a.Tab.Paint = tab_paint
-		function a.Tab.Think(pan) pan:SetFont(chatbox.box_font) end
+	self.direct_messages.tabs = {}
+	
+	local nextCheck = -1
+	local playersCount = table.Count(self.direct_messages.tabs)
+
+	self.direct_messages.Paint = function(self, w, h)
+		paint_back(pan, w, h, true)
+
+		if nextCheck < CurTime() then
+			nextCheck = CurTime() + 0.5
+			playersCount = table.Count(self.tabs)
+		end
+		
+		if playersCount <= 0 then
+			draw.SimpleText("Нет игроков", currentBoxFontName, w / 2, h / 2, color_white, 1, 1)
+		end
+	end
+
+	self.direct_messages.OnRowSelected = function(self, rowIndex, row)
+		for key, value in pairs(self.tabs) do
+			if row.AccountID == key then
+				value:Show()
+				
+				currentSelectedUser = key
+			elseif not IsValid(row.Player) then
+				local tab = self.tabs[row.AccountID]
+				if IsValid(tab) then
+					tab:Remove()
+					self.tabs[row.AccountID] = nil
+				end
+
+				value:Remove()
+			else
+				value:Hide()
+			end
+		end
+	end
+
+	for key, value in ipairs(player.GetAll()) do
+		chatbox.AddDMTab(value)
+	end
+
+	a = self.tabs:AddSheet(chat.L"DMs", self.double, "icon16/group.png")
+
+	function a.Tab.Think(pan)
+		pan:SetFont(currentBoxFontName)
+	end
+	
+	return self.double
 end
+
+hook.Add("NetworkEntityCreated", "xp_dm_create", function(ent)
+	if not ent:IsPlayer()
+		or ent == LocalPlayer() then
+		return
+	end
+
+	chatbox.AddDMTab(ent)
+end)
+
+hook.Add("EntityRemoved", "xp_dm_remove", function(ent)
+	if not ent:IsPlayer()
+		or ent == LocalPlayer()
+		or not IsValid(chatbox.frame) then
+		return
+	end
+
+	local acID = ent:AccountID()
+	local tab = chatbox.frame.tabs[acID]
+
+	if not IsValid(tab) then
+		return
+	end
+	
+	tab:Remove()
+	self.tabs[row.AccountID] = nil
+end)
 
 local function build_settings_from_table(self, tbl)
 	for cat, i in next, tbl do
@@ -462,9 +644,11 @@ function chatbox.BuildTabSettings(self, a)
 		build_settings_from_table(self.settings, chatbox.settings)
 
 		a = self.tabs:AddSheet("Settings", self.settings)
-		a.Tab.Paint = tab_paint
-		function a.Tab.Think(pan) pan:SetFont(chatbox.box_font) end
+
+		function a.Tab.Think(pan) pan:SetFont(currentBoxFontName) end
 end
+
+local matBlurScreen = Material("pp/blurscreen")
 
 function chatbox.Build()
 	if IsValid(chatbox.frame) then return end
@@ -490,7 +674,7 @@ function chatbox.Build()
 
 		self:ShowCloseButton(false)
 
-		function self.lblTitle.Think(pan) pan:SetFont(chatbox.box_font) end
+		function self.lblTitle.Think(pan) pan:SetFont(currentBoxFontName) end
 
 		function self:PerformLayout()
 			local titlePush = 0
@@ -513,56 +697,84 @@ function chatbox.Build()
 			self.lblTitle:SetPos(10 + titlePush, 3)
 			self.lblTitle:SetSize(self:GetWide() - 25 - titlePush, 20)
 			self.lblTitle:SetColor(chatbox.accent_color)
-
-			if self.direct_messages then
-				self.direct_messages.new:SetPos(self:GetWide() - self.direct_messages.new:GetWide() - 8, 30)
-			end
 		end
 
 		function self:Paint(w, h)
+			surface.SetMaterial( matBlurScreen )
+			surface.SetDrawColor( 255, 255, 255, 255 )
+
+			local x, y = self:LocalToScreen( 0, 0 )
+			for i = 0.33, 1, 0.33 do
+				matBlurScreen:SetFloat( "$blur", 2 * i )
+				matBlurScreen:Recompute()
+				render.UpdateScreenEffectTexture()
+				surface.DrawTexturedRect( -x, -y, ScrW(), ScrH() )
+			end
+
+			surface.SetDrawColor(chatbox.back_color)
+			surface.DrawRect(0, 0, w, 25)
+
 			surface.SetDrawColor(chatbox.back_color)
 			surface.DrawRect(0, 0, w, h)
 		end
 
-	self.tabs = vgui.Create("DPropertySheet", self)
-		function self.tabs:Paint(w, h) end
-		self.tabs:Dock(FILL)
 
-		local a = {}
+	local panels = {}
+	local buttons = {}
 
-		chatbox.BuildTabChat(self, a)
-		chatbox.BuildTabDMs(self, a)
-		--chatbox.BuildTabSettings(self, a)
+	self.tabsButtons = vgui.Create("DPanel", self)
+	function self.tabsButtons:Paint(w, h) end
+	self.tabsButtons:Dock(TOP)
+	self.tabsButtons:DockMargin(0, 0, 0, 2)
+	self.tabsButtons:SetTall(tabHeight)
 
-		if self.direct_messages then
-			self.direct_messages.new = vgui.Create("DButton", self)
-				self.direct_messages.new:SetText("")
-				self.direct_messages.new:SetWide(72)
-
-				function self.direct_messages.new.Paint(pan, w, h)
-					paint_back(pan, w, h, true)
-
-					local text = "New DM"
-					draw.SimpleText(text, chatbox.box_font, w/2, h/2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-				end
-
-				function self.direct_messages.new.DoClick(pan)
-					local menu = DermaMenu(pan)
-					self.dmSelector = menu
-
-					for k, v in next, player.GetAll() do
-						if v ~= LocalPlayer() then
-							menu:AddOption(v:Nick(), function()
-								if IsValid(v) then chatbox.GiveDMFocus(v) end
-							end):SetIcon(v:GetFriendStatus() == "friend" and "icon16/user_green.png" or "icon16/user.png")
-						end
-					end
-
-					menu:Open()
-				end
+	self.tabs = vgui.Create("DPanel", self)
+	self.tabs.SwitchToName = function(self, name)
+		for key, p in pairs(buttons) do
+			if name == p.Name then
+				p.Frame:Show()
+			else
+				p.Frame:Hide()
+			end
 		end
+	end
 
-		chatbox.Close(true)
+	self.tabs.AddSheet = function(_, buttonName, panel, icon)
+		local buttonIndex = #buttons + 1
+		local but = self.tabsButtons:Add("DButton")
+		but:Dock(LEFT)
+		but:DockMargin(0, 0, 5, 0)
+		but:SetText("")
+		but.Tab = but
+		but.Frame = panel
+		but.Name = buttonName
+		but.Index = buttonIndex
+		but.Paint = tab_paint
+		but.Icon = Material(icon)
+		but.DoClick = function()
+			for key, p in pairs(panels) do
+				if key == buttonIndex then
+					p:Show()
+					currentTab = buttonIndex
+				else
+					p:Hide()
+				end
+			end
+		end
+		
+		table.insert(buttons, but)
+
+		return but
+	end
+
+	function self.tabs:Paint(w, h) end
+	self.tabs:Dock(FILL)
+
+	table.insert(panels, chatbox.BuildTabChat(self, a))
+	table.insert(panels, chatbox.BuildTabDMs(self, a))
+	--chatbox.BuildTabSettings(self, a)
+	
+	chatbox.Close(true)
 end
 
 function chatbox.GetChatFeed()
@@ -576,18 +788,8 @@ end
 function chatbox.GiveChatFocus()
 	if not chatbox.IsOpen() then return end
 
-	chatbox.frame.tabs:SwitchToName("Chat")
+	chatbox.frame.tabs:SwitchToName(chat.L"Chat")
 	chatbox.frame.chat.input:RequestFocus()
-end
-
-function chatbox.GiveDMFocus(ply)
-	if not chatbox.IsOpen() or not chatexp or not IsValid(ply) then return end
-
-	chatbox.AddDMTab(ply)
-
-	chatbox.frame.tabs:SwitchToName("DMs")
-	chatbox.frame.direct_messages:SwitchToName(ply:Nick())
-	chatbox.frame.direct_messages.tabs[ply:SteamID()].input:RequestFocus()
 end
 
 function chatbox.Close(no_hook)
@@ -604,12 +806,9 @@ end
 
 function chatbox.Open(t)
 	chatbox.Build()
-
-	if chatexp then
-		chatbox.mode = t and CHATMODE_TEAM or CHATMODE_DEFAULT
-	else
-		chatbox.mode = t
-	end
+	chatbox.mode = chatbox.mode or CHATMODE_DEFAULT
+	-- Сделать настройку, чтобы можно было ебашить при открывании чат по-умолчанию.
+	-- chatbox.mode = CHATMODE_DEFAULT
 
 	chatbox.frame:SetTitle(GetHostName())
 	chatbox.frame:SetVisible(true)

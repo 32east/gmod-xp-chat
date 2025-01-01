@@ -33,9 +33,10 @@ local spaces =
 
 local f = "DermaDefault"
 surface.__SetFont = surface.__SetFont or surface.SetFont
+local setFont = surface.__SetFont
 
 function surface.SetFont(font)
-	surface.__SetFont(font)
+	setFont(font)
 	f = font
 end
 
@@ -53,34 +54,32 @@ function surface.GetTextSize(t)
 	cche[f] = cche[f] or {}
 	local w, h = surface.__GetTextSize(t)
 	cche[f][t] = {w, h}
+
 	return w, h
 end
 
 surface.__CreateFont = surface.__CreateFont or surface.CreateFont
+surface.CachedFonts = surface.CachedFonts or {}
 
-function surface.CreateFont(font, ...)
-	surface.__CreateFont(font, ...)
+function surface.GetLuaFonts()
+	return surface.CachedFonts
+end
+
+function surface.CreateFont(font, array, ...)
+	surface.__CreateFont(font, array, ...)
 	cche[font] = nil
-end
-
-function surface.IsValidFont(...)
-	return not not pcall(surface.SetFont, ...)
-end
-
-local fallbackFont = "DermaDefault"
-function surface.SetFontFallback(font)
-	if surface.IsValidFont(font) then
-		surface.SetFont(font)
-	else
-		surface.SetFont(fallbackFont)
-	end
+	surface.CachedFonts[font:lower()] = {
+		font = font,
+	}
+	table.Merge(array, surface.CachedFonts[font:lower()])
 end
 
 function Text:MakeCharInfo(markup, buffer, data)
 	local chars = utf_totable(data)
 	local words = spaces:Explode(data, true)
-	local x, y, w = buffer.x or 0, 0, markup.w or math.huge
-	surface.SetFontFallback(buffer.font)
+	local x, y, w = buffer.x or 0, 0, markup.w or 99999999999
+
+	surface.SetFont(buffer.font)
 
 	local cword = 1
 	local charinfo = {}
@@ -92,7 +91,10 @@ function Text:MakeCharInfo(markup, buffer, data)
 	local skip
 	local h = 0
 
-	for i, char in pairs(chars) do
+	local charC = #chars
+	for i = 1, charC do
+		local char = chars[i]
+
 		if skip then skip = nil continue end
 		local _newline = newline
 		local cw, ch = surface.GetTextSize(char)
@@ -113,11 +115,14 @@ function Text:MakeCharInfo(markup, buffer, data)
 					if _newline + y > h then
 						h = _newline + y
 					end
-				continue end
+					goto skip
+				end
 			end
 			charinfo[#charinfo + 1] = {char, x, y, char == "\t" and tabwidth or cw, ch}
 			x = x + (char == "\t" and tabwidth or cw)
-		continue end
+			goto skip
+		end
+
 		if char == "\n" or char == "\r" then
 			if buffer.newlineSize then
 				if buffer.newlineSize > newline then
@@ -130,7 +135,8 @@ function Text:MakeCharInfo(markup, buffer, data)
 			if _newline + y > h then
 				h = _newline + y
 			end
-		continue end
+			goto skip
+		end
 
 		if x + cw > w then
 			x, y = 0, y + _newline
@@ -146,6 +152,8 @@ function Text:MakeCharInfo(markup, buffer, data)
 		if ch + y > h then
 			h = ch + y
 		end
+		
+		::skip::
 	end
 
 	self.charinfo = charinfo
@@ -160,59 +168,74 @@ function Text:PerformLayout(markup, buffer, data)
 	self:MakeCharInfo(markup, buffer, data)
 end
 
+local pairs = pairs
+local match = string.match
+local surfaceSetFont = surface.SetFont
+local surfaceSetFontFallback = surface.SetFontFallback
+local surfaceSetTextColor = surface.SetTextColor
+local surfaceSetTextPos = surface.SetTextPos
+local surfaceDrawText = surface.DrawText
+local surfaceSetDrawColor = surface.SetDrawColor
+local surfaceDrawRect = surface.DrawRect
+local number = number
+
+local funcA = function(c) return markup, buffer, c.data end
+local funcB = function(c) return markup, buffer, c.data, char, cx, cy, cw, ch, font end
+
 function Text:Draw(markup, buffer, data)
-	local chinfo = self.charinfo
-	if not chinfo then return end
-	local font, color = buffer.font, buffer.fgColor
-	local bgcolor = buffer.bgColor
-	local y = buffer.y or 0
-	local isNewWord
-	for _, ci in pairs(chinfo) do
-		local char, cx, cy, cw, ch = ci[1], ci[2], ci[3], ci[4], ci[5]
-		cy = cy + y
-		if isNewWord then
-			isNewWord = nil
-			markup:Call("StartWord", function(c) return markup, buffer, c.data end)
-		else
-			if char:match(spaces) or char == "\t" then
-				markup:Call("EndWord", function(c) return markup, buffer, c.data end)
-				isNewWord = true
-			end
-		end
-		markup:Call("StartChar", function(c) return markup, buffer, c.data, char, cx, cy, cw, ch, font end)
-		if buffer.shadow then
-			local size = number(buffer.shadow, 1, 10, 2)
-			if surface.IsValidFont(font .. "_blur") then
-				surface.SetFont(font .. "_blur")
-			else
-				surface.SetFontFallback(font)
-			end
-			for i = 1, size do
-				for x = 1, 2 do
-					if chathud.oldShadow then
-						surface.SetTextColor(0, 0, 0, 150 / x)
-						surface.SetTextPos(cx + i, cy + i)
-					else
-						surface.SetTextColor(0, 0, 0, 255)
-						surface.SetTextPos(cx, cy + (x - 1))
-					end
-					surface.DrawText(char)
-				end
-			end
-		end
-		surface.SetFontFallback(font)
-		if bgcolor.a > 0 then
-			surface.SetDrawColor(bgcolor)
-			surface.DrawRect(cx, cy, cw, ch)
-		end
-		surface.SetTextColor(color)
-		surface.SetTextPos(cx, cy)
-		surface.DrawText(char)
-		markup:Call("EndChar", function(c) return markup, buffer, c.data, char, cx, cy, cw, ch, font end)
-	end
-	if not isNewWord then
-		markup:Call("EndWord", function(c) return markup, buffer, c.data end)
-	end
+    local chinfo = self.charinfo
+    if not chinfo then return end
+    local font, color = buffer.font, buffer.fgColor
+    local bgcolor = buffer.bgColor
+    local y = buffer.y or 0
+    local isNewWord
+	local oldShadow = chathud.oldShadow
+	local cInfoC = #chinfo
+
+	for i = 1, cInfoC do
+		local ci = chinfo[i]
+        local char, cx, cy, cw, ch = ci[1], ci[2], ci[3], ci[4], ci[5]
+        cy = cy + y
+        if isNewWord then
+            isNewWord = nil
+            markup:Call("StartWord", funcA)
+        else
+            if match(char, spaces) or char == "\t" then
+                markup:Call("EndWord", funcA)
+                isNewWord = true
+            end
+        end
+        markup:Call("StartChar", funcB)
+        if buffer.shadow then
+            local size = buffer.shadow
+            surfaceSetFont(font .. "_blur")
+
+            for i = 1, size do
+                for x = 1, 2 do
+                    if oldShadow then
+                        surfaceSetTextColor(0, 0, 0, 150 / x)
+                        surfaceSetTextPos(cx + i, cy + i)
+                    else
+                        surfaceSetTextColor(0, 0, 0, 255)
+                        surfaceSetTextPos(cx, cy + (x - 1))
+                    end
+                    surfaceDrawText(char)
+                end
+            end
+        end
+        surfaceSetFont(font)
+        if bgcolor.a > 0 then
+                surfaceSetDrawColor(bgcolor)
+                surfaceDrawRect(cx, cy, cw, ch)
+        end
+        surfaceSetTextColor(color)
+        surfaceSetTextPos(cx, cy)
+        surfaceDrawText(char)
+        markup:Call("EndChar", funcB)
+    end
+    if not isNewWord then
+        markup:Call("EndWord", funcA)
+    end
 end
 
 function Text:ModifyBuffer(markup, buffer, data)
@@ -240,7 +263,9 @@ class:register("GenericDrawable", GenericDrawable, "BaseChunk")
 local Image = {}
 
 function Image:__ctor(markup, buffer, data)
-	self.size = number(data.size, 8, 128, 8)
+	local size = data.size
+	size = size > 128 and 128 or size < 8 and 8 or size
+	self.size = size
 end
 
 function Image:Draw(markup, buffer, data)
@@ -280,8 +305,8 @@ local function wrap(method)
 	return function(self, markup, buffer, data)
 		local args = data.data
 		local newargs = {}
-		for _, arg in pairs(args) do
-			newargs[#newargs + 1] = arg()
+		for i = 1, #args do
+			newargs[#newargs + 1] = args[i]()
 		end
 		local ok, why = pcall(data[method] or placeholder, self, markup, buffer, newargs)
 		if not ok then
@@ -335,21 +360,30 @@ class:register("MarkupBuffer", MarkupBuffer)
 local Markup = {}
 
 function Markup:__ctor()
-	self.alpha = 255
+	self.alpha = 50
 	self.chunks = {}
 	self.buffer = class:new("MarkupBuffer", self)
 end
 
 function Markup:Call(method, ...)
-	for _, chunk in ipairs(self.chunks) do
+	local arg1 = select(1, ...)
+	local is_func = isfunction(arg1)
+
+	for i = 1, #self.chunks do
+		local chunk = self.chunks[i]
 		local m = chunk[method]
-		if m then
-			if isfunction(select(1, ...) or 0) then
-				m(chunk, select(1, ...)(chunk))
-			else
-				m(chunk, ...)
-			end
+
+		if not m then
+			goto skip
 		end
+
+		if is_func then
+			m(chunk, arg1(chunk))
+		else
+			m(chunk, ...)
+		end
+		
+		::skip::
 	end
 end
 
@@ -376,13 +410,13 @@ function Markup:Draw(nodraw)
 	for i = 1, #self.chunks, 1 do
 		local chunk = self.chunks[i]
 		if chunk.__skip or chunk.__panic then continue end
-		if type(chunk) == "MarkupTag" then
+		local chunkType = type(chunk)
+		if chunkType == "MarkupTag" then
 			if not activeTags[chunk] then
 				activeTags[chunk] = chunk
 				chunk:TagStart(self, buffer, chunk.data)
 			end
-		end
-		if type(chunk) == "MarkupTagStopper" then
+		elseif chunkType == "MarkupTagStopper" then
 			if chunk.data then
 				local chunker = activeTags[chunk.data]
 				if chunker then
@@ -391,7 +425,10 @@ function Markup:Draw(nodraw)
 					chunker.__skip = true
 				end
 			else
-				for _, chunker in pairs(activeTags) do
+				local cactiveTags = #activeTags
+				for i = 1, cactiveTags do
+					local chunker = activeTags[i]
+
 					chunker:TagEnd(self, buffer, chunker.data)
 					chunker.__skip = true
 				end
@@ -421,6 +458,8 @@ function Markup:AlphaTick()
 	local s, e = self.startTime, self.endTime
 	if s and e and CurTime() > s + e then
 		self.alpha = self.alpha - self.fadeOut / 2
+	else
+		self.alpha = math.min(self.alpha + RealFrameTime() * 255 * 3, 255)
 	end
 end
 
@@ -582,7 +621,10 @@ local function parse(self, str, ply, tags, shouldEscape, stopFunc, addFunc, addT
 	local activeTags = {}
 	local escaped
 
-	for _, s in pairs(utf_totable(str)) do
+	local toTable = utf_totable(str)
+	for i = 1, #toTable do
+		local s = toTable[i]
+
 		if s == "<" and not inTag then
 			inTag = true
 			if cur ~= "" then
@@ -641,7 +683,8 @@ local function parse(self, str, ply, tags, shouldEscape, stopFunc, addFunc, addT
 			end
 
 			cur = ""
-		continue end
+			continue 
+		end
 
 		cur = cur .. s
 	end
@@ -707,6 +750,7 @@ function Markup:Parse(data, ply, noPreTags, noShortcuts)
 	if not noShortcuts then
 		str = str:gsub("%:([0-9A-z%-_]-)%:", function(a)
 			local sh = chathud.Shortcuts[a]
+
 			if sh then
 				return sh
 			end

@@ -20,6 +20,28 @@ function net.HasOverflowed()
 	return (net.BytesWritten() or 0) >= 65536
 end
 
+function net.WriteCompressedString(str)
+	local c_str = util.Compress(str)
+	
+	if c_str and #c_str < #str then
+		net.WriteBool(true)
+		net.WriteUInt(#c_str, 16)
+		net.WriteData(c_str, #c_str)
+	else
+		net.WriteBool(false)
+		net.WriteString(str)
+	end
+end
+
+function net.ReadCompressedString()
+	local isCompressed = net.ReadBool()
+
+	return isCompressed
+		and util.Decompress(net.ReadData(net.ReadUInt(16)), 1024)
+		or net.ReadString()
+		or ""
+end
+
 chatexp.Modes = {
 	{
 			Name = "Default",
@@ -44,10 +66,11 @@ chatexp.Modes = {
 				tbl[#tbl + 1] = msg
 			end,
 	},
+
 	{
-			Name = "Team",
+			Name = "Local",
 			Filter = function(send, ply)
-				return send:Team() == ply:Team()
+				return send:GetPos():DistToSqr(ply:GetPos()) < 256*256
 			end,
 			Handle = function(tbl, ply, msg, dead, mode_data)
 				if dead then
@@ -55,8 +78,8 @@ chatexp.Modes = {
 					tbl[#tbl + 1] = "*DEAD* "
 				end
 
-				tbl[#tbl + 1] = color_green
-				tbl[#tbl + 1] = "(TEAM) "
+				tbl[#tbl + 1] = Color(125, 110, 255)
+				tbl[#tbl + 1] = "(" .. chat.L"Local" .. ") "
 
 				tbl[#tbl + 1] = ply -- ChatHUD parses this automaticly
 				tbl[#tbl + 1] = color_white
@@ -70,13 +93,14 @@ chatexp.Modes = {
 				tbl[#tbl + 1] = msg
 			end,
 	},
+
 	{
 			Name = "DM",
 			-- No Filter.
 			Handle = function(tbl, ply, msg, dead, mode_data)
 				if ply == LocalPlayer() then
 					tbl[#tbl + 1] = color_hint
-					tbl[#tbl + 1] = "You"
+					tbl[#tbl + 1] = chat.L"You"
 					tbl[#tbl + 1] = color_white
 					tbl[#tbl + 1] = " -> "
 					tbl[#tbl + 1] = Player(mode_data)
@@ -87,7 +111,7 @@ chatexp.Modes = {
 					tbl[#tbl + 1] = color_white
 					tbl[#tbl + 1] = " -> "
 					tbl[#tbl + 1] = color_hint
-					tbl[#tbl + 1] = "You"
+					tbl[#tbl + 1] = chat.L"You"
 
 					hook.Run("ReceiveDM", ply, msg)
 				end
@@ -107,25 +131,12 @@ end
 
 if CLIENT then
 	function chatexp.Say(msg, mode, mode_data)
-		local cdata = util.Compress(msg)
-
-		local suc, err = pcall(function()
 		net.Start(chatexp.NetTag)
-			net.WriteUInt(#cdata, 16)
-			net.WriteData(cdata, #cdata)
+			net.WriteCompressedString(msg)
 
 			net.WriteUInt(mode, 8)
 			net.WriteUInt(mode_data or 0, 16)
 		net.SendToServer()
-		end)
-
-		if not suc then
-			Msg"CEXP " print("Not installed correctly!\n" .. err)
-
-			if mode ~= CHATMODE_DM then
-				LocalPlayer():ConCommand((mode == CHATMODE_TEAM and "say_team \"" or "say \"") .. msg .. "\"")
-			end -- fallback
-		end
 	end
 
 	function chatexp.SayChannel(msg, channel)
@@ -138,25 +149,15 @@ if CLIENT then
 
 	net.Receive(chatexp.NetTag, function()
 		local ply 	= net.ReadEntity()
-
-		local len 	= net.ReadUInt(16)
-		local data 	= net.ReadData(len)
-
+		local data = net.ReadCompressedString()
 		local mode 	= net.ReadUInt(8)
 		local mode_data = net.ReadUInt(16)
-
-		data = util.Decompress(data, 1024)
-
-		if not data then
-			Msg"CEXP " print"Failed to decompress message."
-			return
-		end
 
 		local dead = ply:IsValid() and ply:IsPlayer() and not ply:Alive()
 		hook.Run("OnPlayerChat", ply, data, mode, dead, mode_data)
 	end)
 
-else -- CLIENT
+else -- SERVER
 
 	util.AddNetworkString(chatexp.NetTag)
 
@@ -177,7 +178,13 @@ else -- CLIENT
 
 		local filter = {}
 		if mode == CHATMODE_DM then
-			filter = {Player(mode_data)}
+			local plSend = Player(mode_data)
+			
+			if plSend == ply then
+				return
+			end
+
+			filter = {plSend}
 		elseif msgmode.Filter then
 			for k, v in next,player.GetHumans() do
 				if msgmode.Filter(ply, v) ~= false then filter[#filter+1] = v end
@@ -189,17 +196,10 @@ else -- CLIENT
 		if #filter == 0 then return end
 		if not table.HasValue(filter, ply) then filter[#filter+1] = ply end
 
-		local cdata = util.Compress(data)
-		if not cdata then
-			Msg"CEXP " print"Failed to re-compress message."
-			return
-		end
-
 		net.Start(chatexp.NetTag)
 			net.WriteEntity(ply)
 
-			net.WriteUInt(#cdata, 16)
-			net.WriteData(cdata, #cdata)
+			net.WriteCompressedString(data)
 
 			net.WriteUInt(mode, 8)
 			net.WriteUInt(mode_data, 16)
@@ -209,23 +209,13 @@ else -- CLIENT
 				return
 			end
 		net.Send(filter)
-
-		print(ply:Nick() .. ": " .. data)
 	end
 
 	net.Receive(chatexp.NetTag, function(_, ply)
-		local len		= net.ReadUInt(16)
-		local cdata	= net.ReadData(len)
+		local data = net.ReadCompressedString()
 
 		local mode	= net.ReadUInt(8)
 		local mode_data = net.ReadUInt(16)
-
-		local data = util.Decompress(cdata, 1024)
-
-		if not data then
-			Msg"CEXP " print"Failed to decompress message."
-			return
-		end
 
 		chatexp.SayAs(ply, data, mode, mode_data)
 	end)
