@@ -31,32 +31,14 @@ local spaces =
 "\xE2\x80\x89\xE2\x80\x8A\xE2\x80\x8B\xE2\x80\xAF\xE2\x81\x9F\xE3\x80\x80" ..
 "\xEF\xBB\xBF]"
 
-local f = "DermaDefault"
 surface.__SetFont = surface.__SetFont or surface.SetFont
 local setFont = surface.__SetFont
-
-function surface.SetFont(font)
-	setFont(font)
-	f = font
-end
 
 function surface.GetFont()
 	return f
 end
 
 local cche = {}
-
-surface.__GetTextSize = surface.__GetTextSize or surface.GetTextSize
-function surface.GetTextSize(t)
-	if cche[f] and cche[f][t] then
-		return cche[f][t][1], cche[f][t][2]
-	end
-	cche[f] = cche[f] or {}
-	local w, h = surface.__GetTextSize(t)
-	cche[f][t] = {w, h}
-
-	return w, h
-end
 
 surface.__CreateFont = surface.__CreateFont or surface.CreateFont
 surface.CachedFonts = surface.CachedFonts or {}
@@ -65,99 +47,112 @@ function surface.GetLuaFonts()
 	return surface.CachedFonts
 end
 
-function surface.CreateFont(font, array, ...)
-	surface.__CreateFont(font, array, ...)
-	cche[font] = nil
-	surface.CachedFonts[font:lower()] = {
-		font = font,
-	}
-	table.Merge(array, surface.CachedFonts[font:lower()])
-end
-
+local tempWidth = 0
 function Text:MakeCharInfo(markup, buffer, data)
-	local chars = utf_totable(data)
-	local words = spaces:Explode(data, true)
-	local x, y, w = buffer.x or 0, 0, markup.w or 99999999999
+    local chars = utf_totable(data)
+    local words = spaces:Explode(data, true)
+    local x, y, w = buffer.x or 0, 0, markup.w or 99999999999
 
-	surface.SetFont(buffer.font)
+    surface.SetFont(buffer.font)
 
-	local cword = 1
-	local charinfo = {}
+    local cword = 1
+    local charinfo = {}
+    local current_line = ""
+    local current_line_width = 0
 
-	local tabwidth = surface.GetTextSize("     ")
-	local _,newline = surface.GetTextSize("\n")
-	newline = newline / 2
+    local tabwidth = surface.GetTextSize("     ")
+    local _,newline = surface.GetTextSize("\n")
+    newline = newline / 2
 
-	local skip
-	local h = 0
+    local h = 0
+	buffer.tempWidth = buffer.tempWidth or 0
 
-	local charC = #chars
-	for i = 1, charC do
-		local char = chars[i]
-
-		if skip then skip = nil continue end
-		local _newline = newline
-		local cw, ch = surface.GetTextSize(char)
-		if char:match(spaces) or char == "\t" then
-			local word = words[cword + 1]
-			if word then
-				cword = cword + 1
-				local ww = surface.GetTextSize(word)
-				if x + ww + cw > w then
-					if buffer.newlineSize then
-						if buffer.newlineSize > newline then
-							_newline = buffer.newlineSize
-						end
-						buffer.newlineSize = nil
-					end
-					charinfo[#charinfo + 1] = {"\n", x, y, 0, _newline}
-					x, y = 0, y + _newline
-					if _newline + y > h then
-						h = _newline + y
-					end
-					goto skip
-				end
-			end
-			charinfo[#charinfo + 1] = {char, x, y, char == "\t" and tabwidth or cw, ch}
-			x = x + (char == "\t" and tabwidth or cw)
-			goto skip
-		end
-
-		if char == "\n" or char == "\r" then
-			if buffer.newlineSize then
-				if buffer.newlineSize > newline then
-					_newline = buffer.newlineSize
-				end
-				buffer.newlineSize = nil
-			end
-			x, y = 0, y + _newline
-			charinfo[#charinfo + 1] = {"\n", x, y, 0, _newline}
-			if _newline + y > h then
-				h = _newline + y
-			end
-			goto skip
-		end
-
-		if x + cw > w then
-			x, y = 0, y + _newline
-			if _newline + y > h then
-				h = _newline + y
-			end
-		end
-
-		charinfo[#charinfo + 1] = {char, x, y, cw, ch}
-
-		x = x + cw
-
-		if ch + y > h then
-			h = ch + y
-		end
+    local charC = #chars
+    for i = 1, charC do
+        local char = chars[i]
 		
-		::skip::
-	end
+		if not char then
+			continue
+		end
 
-	self.charinfo = charinfo
-	self.h, self.x, self.y = h, x, y
+        local cw, ch = surface.GetTextSize(char)
+
+        if char:match(spaces) or char == "\t" then
+            local word = words[cword + 1]
+            if word then
+                cword = cword + 1
+                local ww = surface.GetTextSize(word)
+
+                if buffer.tempWidth + cw > w then
+					local line = string.Trim(current_line)
+				
+					if line ~= "" then
+						charinfo[#charinfo + 1] = {line, x, y, current_line_width, newline}
+					end
+					
+                    y = y + newline
+                    x = 0
+                    if newline + y > h then
+                        h = newline + y
+                    end
+                    current_line = ""
+                    current_line_width = 0
+                end
+            end
+            current_line = current_line .. char
+            current_line_width = current_line_width + (char == "\t" and tabwidth or cw)
+			buffer.tempWidth = buffer.tempWidth + (char == "\t" and tabwidth or cw)
+        elseif char == "\n" or char == "\r" then
+			local line = string.Trim(current_line)
+			
+			if line ~= "" then
+				charinfo[#charinfo + 1] = {line, x, y, current_line_width, newline}
+			end
+
+            y = y + newline
+            x = 0
+            if newline + y > h then
+                    h = newline + y
+            end
+            current_line = ""
+            current_line_width = 0
+			buffer.tempWidth = 0
+        else
+            if buffer.tempWidth + cw > w then
+				local line = string.Trim(current_line)
+
+				if line ~= "" then
+					charinfo[#charinfo + 1] = {line, x, y, current_line_width, newline}
+				end
+
+                y = y + newline
+                x = 0
+                if newline + y > h then
+                    h = newline + y
+                end
+                current_line = ""
+                current_line_width = 0
+				buffer.tempWidth = 0
+            end
+
+            current_line = current_line .. char
+            current_line_width = current_line_width + cw
+			buffer.tempWidth = buffer.tempWidth + cw
+        end
+    end
+
+	local line = string.Trim(current_line)
+    if line ~= "" then
+        charinfo[#charinfo + 1] = {line, x, y, current_line_width, newline}
+        x = x + current_line_width
+
+        if newline + y > h then
+            h = newline + y
+        end
+    end
+
+    self.charinfo = charinfo
+    self.h, self.x, self.y = h, x, y
 end
 
 function Text:__ctor(markup, buffer, data)
@@ -188,7 +183,6 @@ function Text:Draw(markup, buffer, data)
     local font, color = buffer.font, buffer.fgColor
     local bgcolor = buffer.bgColor
     local y = buffer.y or 0
-    local isNewWord
 	local oldShadow = chathud.oldShadow
 	local cInfoC = #chinfo
 
@@ -196,45 +190,27 @@ function Text:Draw(markup, buffer, data)
 		local ci = chinfo[i]
         local char, cx, cy, cw, ch = ci[1], ci[2], ci[3], ci[4], ci[5]
         cy = cy + y
-        if isNewWord then
-            isNewWord = nil
-            markup:Call("StartWord", funcA)
-        else
-            if match(char, spaces) or char == "\t" then
-                markup:Call("EndWord", funcA)
-                isNewWord = true
-            end
-        end
-        markup:Call("StartChar", funcB)
+
         if buffer.shadow then
             local size = buffer.shadow
             surfaceSetFont(font .. "_blur")
+            surfaceSetTextColor(0, 0, 0, 255)
 
             for i = 1, size do
-                for x = 1, 2 do
-                    if oldShadow then
-                        surfaceSetTextColor(0, 0, 0, 150 / x)
-                        surfaceSetTextPos(cx + i, cy + i)
-                    else
-                        surfaceSetTextColor(0, 0, 0, 255)
-                        surfaceSetTextPos(cx, cy + (x - 1))
-                    end
-                    surfaceDrawText(char)
-                end
+                surfaceSetTextPos(cx, cy)
+                surfaceDrawText(char)
             end
         end
         surfaceSetFont(font)
+
         if bgcolor.a > 0 then
-                surfaceSetDrawColor(bgcolor)
-                surfaceDrawRect(cx, cy, cw, ch)
+            surfaceSetDrawColor(bgcolor)
+            surfaceDrawRect(cx, cy, cw, ch)
         end
+
         surfaceSetTextColor(color)
         surfaceSetTextPos(cx, cy)
         surfaceDrawText(char)
-        markup:Call("EndChar", funcB)
-    end
-    if not isNewWord then
-        markup:Call("EndWord", funcA)
     end
 end
 
@@ -368,9 +344,10 @@ end
 function Markup:Call(method, ...)
 	local arg1 = select(1, ...)
 	local is_func = isfunction(arg1)
+	local ch = self.chunks
 
-	for i = 1, #self.chunks do
-		local chunk = self.chunks[i]
+	for i = 1, #ch do
+		local chunk = ch[i]
 		local m = chunk[method]
 
 		if not m then
@@ -407,10 +384,13 @@ function Markup:Draw(nodraw)
 	buffer:Clear()
 	local activeTags = {}
 	local height = 0
-	for i = 1, #self.chunks, 1 do
-		local chunk = self.chunks[i]
+	local ch = self.chunks
+	
+	for i = 1, #ch, 1 do
+		local chunk = ch[i]
 		if chunk.__skip or chunk.__panic then continue end
 		local chunkType = type(chunk)
+
 		if chunkType == "MarkupTag" then
 			if not activeTags[chunk] then
 				activeTags[chunk] = chunk
@@ -635,7 +615,7 @@ local function parse(self, str, ply, tags, shouldEscape, stopFunc, addFunc, addT
 
 		if s == ">" and inTag then
 			inTag = nil
-			cur = cur:lower()
+
 			if cur:sub(1, 1) == "/" then
 				cur = cur:sub(2)
 

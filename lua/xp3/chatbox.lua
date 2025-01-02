@@ -1,10 +1,11 @@
 local chatbox = {}
 
 chatbox.settings = {
-	--[[test = {
-		["Wake me up"] = {ty = "Bool", get = function() return false end, set = print},
-		["Wake ur mom up"] = {ty = "string", get = function() return "cock" end, set = print}
-	}]]
+	test = {
+		["TEST 1"] = {ty = "Bool", get = function() return false end, set = print},
+		["TEST 2"] = {ty = "Color", get = function() return Color(255,255,255) end, set = print},
+		["TEST 3"] = {ty = "Number", get = function() return 0 end, set = print, min = 0, max = 12}
+	}
 }
 
 local box_font = CreateClientConVar("xp_chat_box_font","Roboto",true,false,"Changes the Fonts of the chatbox itself.")
@@ -593,42 +594,52 @@ end)
 local function build_settings_from_table(self, tbl)
 	for cat, i in next, tbl do
 		local c_pan = vgui.Create("DLabel", self)
-			--self:AddItem(c_pan)
-
-			c_pan:SetText("Cuntagory:" .. cat)
+		c_pan:Dock(TOP)
+		c_pan:DockMargin(0, 0, 3, 0)
+		c_pan:SetText(cat)
 
 		for item, data in next, i do
 			local pan = vgui.Create("Panel", self)
 			pan:Dock(TOP)
 			pan:DockMargin(0, 8, 0, 8)
-
-			local tag = vgui.Create("DLabel", pan)
-			tag:Dock(LEFT)
-
-			tag:SetText(item)
+			pan:SizeToContents()
 
 			if data.ty == "Number" then
-				local slide = vgui.Create("DNumberScratch", pan)
+				local tag = vgui.Create("DLabel", pan)
+				tag:Dock(LEFT)
+				tag:SetText(item)
+				tag:SetContentAlignment(7)
 
+				local slide = vgui.Create("DNumberScratch", pan)
+				slide:Dock(FILL)
 				slide:SetValue(data.get())
 				slide:SetMin(data.min)
 				slide:SetMax(data.max)
 
 				slide.OnValueChanged = data.set
 			elseif data.ty == "Color" then
+				local tag = vgui.Create("DLabel", pan)
+				tag:Dock(LEFT)
+				tag:SetText(item)
+				tag:SetContentAlignment(7)
+
 				local color = vgui.Create("DColorMixer", pan)
+				color:Dock(LEFT)
+				color:SizeToContents()
+				color:SetWidth(256)
+				color:SetTall(128)
+				pan:SetTall(128)
 
 				color.ValueChanged = data.set
-			elseif data.ty == "String" then
-				local text = vgui.Create("DTextEntry", pan)
-				text:Dock(LEFT)
-
-				text.OnEnter = function() data.set(text:GetValue()) end
+				
 			elseif data.ty == "Bool" then
-				local check = vgui.Create("DCheckBox", pan)
-				check:Dock(LEFT)
-
+				local check = vgui.Create("DCheckBoxLabel", pan)
+				check:Dock(FILL)
 				check:SetChecked(data.get())
+				check:SetText(item)
+				-- check:SetConVar()
+				-- check:SetValue()
+				check:SizeToContents()
 
 				check.OnChange = data.set
 			end
@@ -643,9 +654,10 @@ function chatbox.BuildTabSettings(self, a)
 
 		build_settings_from_table(self.settings, chatbox.settings)
 
-		a = self.tabs:AddSheet("Settings", self.settings)
+		a = self.tabs:AddSheet("Settings", self.settings, "icon16/cog.png")
 
 		function a.Tab.Think(pan) pan:SetFont(currentBoxFontName) end
+	return self.settings
 end
 
 local matBlurScreen = Material("pp/blurscreen")
@@ -772,7 +784,7 @@ function chatbox.Build()
 
 	table.insert(panels, chatbox.BuildTabChat(self, a))
 	table.insert(panels, chatbox.BuildTabDMs(self, a))
-	--chatbox.BuildTabSettings(self, a)
+	table.insert(panels, chatbox.BuildTabSettings(self, a))
 	
 	chatbox.Close(true)
 end

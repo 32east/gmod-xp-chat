@@ -158,10 +158,36 @@ if CLIENT then
 	end)
 
 else -- SERVER
-
 	util.AddNetworkString(chatexp.NetTag)
 
 	local print = _print or print
+
+	function chatexp.CheckForSpam(ply, data)
+		if (ply.SpamBlockTime or 0) > CurTime() then
+			return true
+		end
+
+		local len = utf8.len(data)
+		local limClamp = math.Clamp(len / 30, 1.5, 12)
+		ply.LastSpamText, ply.LastSpamTime = ply.LastSpamText or "", ply.LastSpamTime or 0
+
+		if ply.LastSpamText ~= data then
+			ply.LastSpamText, ply.LastSpamTime, ply.SpamTextTry = data, CurTime() + limClamp, 0
+		elseif ply.LastSpamTime > CurTime() then
+			ply.SpamTextTry = (ply.SpamTextTry or 0) + 1
+
+			if ply.SpamTextTry >= 2 then
+				ply.SpamBlockTime = CurTime() + math.Clamp(len / 6, 0.25, 30)
+				ply.SpamTextTry = 0
+
+				return true
+			end
+		else
+			ply.LastSpamText, ply.LastSpamTime, ply.SpamTextTry = data, CurTime() + limClamp, 0
+		end
+		
+		return false
+	end
 
 	function chatexp.SayAs(ply, data, mode, mode_data)
 		if #data > 1024 then
@@ -169,8 +195,12 @@ else -- SERVER
 			return
 		end
 
-		local ret = hook.Run("PlayerSay", ply, data, mode)
+		local block = chatexp.CheckForSpam(ply, data)
+		if block then
+			return ply:ChatPrint("Сообщение не было отправлено, поскольку ваш текст повторяется. Время до размута: " .. math.floor(ply.SpamBlockTime - CurTime()) .. " сек.")
+		end
 
+		local ret = hook.Run("PlayerSay", ply, data, mode)
 		if ret == "" or ret == false then return end
 		if isstring(ret) then data = ret end
 

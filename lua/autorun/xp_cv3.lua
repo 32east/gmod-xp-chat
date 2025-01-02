@@ -8,11 +8,11 @@ if CLIENT then
 		disabled = tobool(newValue)
 		
 	end, "xp_chat_disable")
-elseif disabled then
+elseif disabled then    
 	return
 end
 
-local function includec(...) AddCSLuaFile(...) return include(...) end
+function includec(...) AddCSLuaFile(...) return include(...) end
 class	= includec"xp3/class.lua"
 luadata	= includec"xp3/luadata.lua"
 includec"xp3/lang.lua" 
@@ -24,9 +24,9 @@ end
 local tonumber = tonumber 
 function number(d, min, max, default)
 	d = tonumber(d) or default
-	d = d > max and max or d < min and min or d
+	d = max and d > max and max or min and d < min and min or d
 	return d
-end
+end 
 
 function utf_totable(str)
 	local tbl = {}
@@ -34,7 +34,7 @@ function utf_totable(str)
 		tbl[#tbl + 1] = uchar
 	end
 	return tbl
-end
+end  
 
 includec"xp3/chatexp.lua"
 
@@ -58,6 +58,8 @@ if SERVER then
 	AddCSLuaFile"xp3/chathud.lua"
 	AddCSLuaFile"xp3/chatbox.lua"
 	AddCSLuaFile"xp3/richtextx.lua"
+	AddCSLuaFile"xp3/modules/chat_tags.lua"
+	AddCSLuaFile"xp3/modules/steam_emojis.lua"
 return end
 
 include"xp3/richtextx.lua"
@@ -187,14 +189,55 @@ end, "setFontsChathud")
 doFonts()
 
 do -- chathud
+	local disabled = false
+	local fpsLimit = 24
+	local frameTime = 1 / fpsLimit
+	local lastDrawTime = 0
+
+	local RT, RTM = chat.RenderTarget, chat.RenderTargetMaterial
+
+	chat.RenderTarget, chat.RenderTargetMaterial = nil, nil
 	hook.Add("HUDPaint", "chathud.draw", function()
 		if disabled then
 			return
 		end
 
-		chathud:Draw()
-	end)
+		local w, h = ScrW(), ScrH()
+		if not RT then
+			chat.RenderTarget = GetRenderTarget("chathud_cache" .. SysTime(), w, h)
+			chat.RenderTargetMaterial = CreateMaterial("chathud_cache_mat_" .. SysTime(), "UnlitGeneric", {
+				["$basetexture"] = chat.RenderTarget:GetName(),
+				["$translucent"] = "1",
+				["$ignorez"] = "1",
+			})
 
+			RT, RTM = chat.RenderTarget, chat.RenderTargetMaterial
+		end
+
+		if FrameNumber() % 2 == 0 then
+			render.PushRenderTarget(RT)
+				render.OverrideAlphaWriteEnable(true, true)
+				render.ClearDepth()
+				cam.Start2D()
+					render.Clear(0, 0, 0, 0)
+
+					chathud:Draw()
+				cam.End2D()
+				render.OverrideAlphaWriteEnable(false)
+			render.PopRenderTarget()
+		end
+
+		if RTM then
+        	render.PushFilterMag(TEXFILTER.POINT)
+			render.PushFilterMin(TEXFILTER.POINT)
+				surface.SetDrawColor(255, 255, 255)
+				surface.SetMaterial(RTM)
+				surface.DrawTexturedRect(0, 0, w, h)
+			render.PopFilterMag()
+			render.PopFilterMin()
+			-- render.DrawScreenQuad()
+		end
+	end)
 	hook.Add("HUDShouldDraw", "chathud.disable", function(ch)
 		if disabled then
 			return
